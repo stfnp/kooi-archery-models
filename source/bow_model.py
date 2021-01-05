@@ -6,44 +6,83 @@ from math import sin, cos
 # Simplified implementation (no recurve) of the static bow model found in
 # B.W. Kooi and J.A. Sparenberg: On the static deformation of the bow
 # Journal of Engineering Mathematics, Vol. 14, No. 1, pages 27-45, 1980.
+
 class BowModel:    
-    def __init__(self, theta0, W, L, l):
-        self.theta0 = theta0    # Function (arc length) -> limb angle
-        self.W = W              # Function (arc length) -> bending stiffness
-        self.L = L              # Length of the limb
-        self.l = l              # Length of the string
+    def __init__(self, theta_0, W, L, l):
+        self.theta_0 = theta_0    # Function (arc length) -> limb angle
+        self.W = W                # Function (arc length) -> bending stiffness
+        self.L = L                # Length of a single limb
+        self.l = l                # Length of half the string
 
-    # Returns (s, phi, x, y) such that the bow is in equilibrium at draw length b
+    # Returns (s, phi, x, y, K, alpha) such that the bow is in equilibrium at draw length b
     def solve_equilibrium(self, b):
-        # Corresponds to equations (20) and (21) in the paper
-        def equilibrium_function(z):
+        # Corresponds to functions f1 (20) and f2 (21) in the paper
+        def equilibrium_condition(z):
             (K, alpha) = z
-            [s, phi, x, y] = self.integrate_bending_line(b, K, alpha)
-            return [x[-1] - b + self.l*sin(alpha),
-                    y[-1] - self.l*cos(alpha)]
+            (s, x, y, phi, i_w) = self.integrate_bending_line(b, K, alpha)
+            return [
+                (x[i_w] - b)*cos(alpha) + y[i_w]*sin(alpha),      # Equation (20)
+                y[i_w] - (self.l - self.L + s[i_w])*cos(alpha)    # Equation (21)
+            ]
 
-        res = root(equilibrium_function, [0, 0])
-        return self.integrate_bending_line(b, *res.x)
+        (K, alpha) = root(equilibrium_condition, [0, 0]).x                # TODO: Find initial vaues as described in the paper
+        (s, x, y, phi, i_w) = self.integrate_bending_line(b, K, alpha)
+        
+        return (s, x, y, phi, i_w, K, alpha)    # TODO: Create result class
 
-    # Returns (s, phi, x, y) such that the limb is in equilibrium at the string force K and angle alpha
+    # Returns (s, phi, x, y, sw) such that the limb is in equilibrium with string force K and angle alpha
     def integrate_bending_line(self, b, K, alpha):
-        # Corresponds to equations (12) and (14) in the paper
-        def ode_function(s, z):
+        s_w = self.L    # Contact point on the limb, to be determined if < L
+        i_w = -1
+        
+        # Function that evaluates the derivatives phi'(s), x'(s), y'(s).
+        # Corresponds to equations (6), (12) and (14) in the paper.
+        def function(s, z):
             (phi, x, y) = z
-            return [K/self.W(s)*((b - x)*cos(alpha) - y*sin(alpha)),
-                    sin(phi + self.theta0(s)),
-                    cos(phi + self.theta0(s))]
+            
+            # Determine bending moment
+            if s <= s_w:
+                M = K/self.W(s)*((b - x)*cos(alpha) - y*sin(alpha))    # Equation (12)
+            else:
+                M = 0                                                  # Equation (6)
+                
+            return [
+                M,
+                sin(phi + self.theta_0(s)),   # Equation (14)
+                cos(phi + self.theta_0(s))    # Equation (14)
+            ]
 
-        solution = ([], [], [], [])
-        def output_function(s, z):
-            solution[0].append(s)
-            solution[1].append(z[0])
-            solution[2].append(z[1])
-            solution[3].append(z[2])
+        n_steps = 50    # TODO: Make this configurable
+        
+        s   = [0]
+        phi = [0]
+        x   = [0]
+        y   = [0]
+        
+        sign_prev = 0
+        sign_next = np.sign(phi[0] + alpha + self.theta_0([0]))    # Equation (19), look for sign change from + to -
+        
+        solver = ode(function)
+        solver.set_integrator('dopri5')
+        solver.set_initial_value([phi[0], x[0], y[0]], s[0])
+        
+        for i in range(0, n_steps):
+            s_i = (i + 1)*self.L/n_steps                            # Calculate arc lengths
+            (phi_i, x_i, y_i) = solver.integrate(s_i, step=True)    # Integrate with fixed step size
 
-        solver = ode(ode_function).set_integrator('dopri5', atol=1e-9, rtol=1e-9)
-        solver.set_solout(output_function)
-        solver.set_initial_value([0, 0, 0], 0)
-        solver.integrate(self.L)
+            sign_prev = sign_next
+            sign_next = np.sign(phi_i + alpha + self.theta_0(s_i))    # Equation (19)
+            
+            #print(phi_i + alpha + self.theta_0(s_i))
+            
+            # If sign change from + to - and sw hasn't been assigned something else than L yet, set s_w to s_i
+            if s_w == self.L and sign_next == -1 and sign_prev == +1:
+                s_w = s_i
+                i_w = i + 1
+            
+            s.append(s_i)
+            phi.append(phi_i)
+            x.append(x_i)
+            y.append(y_i)
 
-        return solution
+        return (s, x, y, phi, i_w)
