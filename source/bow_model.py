@@ -8,11 +8,11 @@ from math import sin, cos
 # Journal of Engineering Mathematics, Vol. 14, No. 1, pages 27-45, 1980.
 
 class BowModel:    
-    def __init__(self, theta_0, W, L, l):
-        self.theta_0 = theta_0    # Function (arc length) -> limb angle
-        self.W = W                # Function (arc length) -> bending stiffness
-        self.L = L                # Length of a single limb
-        self.l = l                # Length of half the string
+    def __init__(self, theta_0, W, L, OH):
+        self.theta_0 = theta_0                   # Function (arc length) -> limb angle
+        self.W = W                               # Function (arc length) -> bending stiffness
+        self.L = L                               # Length of a single limb
+        self.l = self.solve_string_length(OH)    # Length of half the string
 
     # Returns (s, phi, x, y, K, alpha) such that the bow is in equilibrium at draw length b
     def solve_equilibrium(self, b):
@@ -26,9 +26,20 @@ class BowModel:
             ]
 
         (K, alpha) = root(equilibrium_condition, [0, 0]).x                # TODO: Find initial vaues as described in the paper
-        (s, x, y, phi, i_w) = self.integrate_bending_line(b, K, alpha)
+        (s, x, y, phi, i_w) = self.integrate_bending_line(b, K, alpha)    # TODO: Duplicate computation
         
         return (s, x, y, phi, i_w, K, alpha)    # TODO: Create result class
+
+    # Returns the length l of half the string such that the bow is in equilibrium at brace height OH
+    def solve_string_length(self, OH):
+        def equilibrium_condition(K):
+            print(K)
+            (s, x, y, phi, i_w) = self.integrate_bending_line(OH, K, 0)
+            return x[i_w] - OH    # Equation (20) for alpha = 0 and b = OH
+            
+        K = root(equilibrium_condition, 0).x
+        (s, x, y, phi, i_w) = self.integrate_bending_line(OH, K, 0)    # TODO: Duplicate computation
+        return y[i_w] + self.L - s[i_w]    # Equation (21) for alpha = 0
 
     # Returns (s, phi, x, y, sw) such that the limb is in equilibrium with string force K and angle alpha
     def integrate_bending_line(self, b, K, alpha):
